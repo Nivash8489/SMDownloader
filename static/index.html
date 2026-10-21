@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reel Saver</title>
+<style>
+:root{--bg:#e8eeee;--ink:#12262b;--muted:#566b70;--panel:#f7faf9;--line:#c3d1d1;--accent:#0b6e63;--accent-ink:#fff;--err:#a3281f}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1b1e;--ink:#e3eeee;--muted:#8fa6a9;--panel:#172a2e;--line:#2a4247;--accent:#3cc5b2;--accent-ink:#06201c;--err:#ff8f84}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:17px/1.5 "Segoe UI",system-ui,sans-serif;display:grid;place-items:center;padding:24px}
+main{width:100%;max-width:620px}
+h1{font:700 clamp(2.2rem,7vw,3.4rem)/1.05 Georgia,"Times New Roman",serif;letter-spacing:-.02em;margin:0 0 10px}
+.sub{color:var(--muted);margin:0 0 28px;max-width:46ch}
+.row{display:flex;gap:10px}
+input{flex:1;min-width:0;padding:14px 16px;font:inherit;color:var(--ink);background:var(--panel);border:1.5px solid var(--line);border-radius:10px}
+input::placeholder{color:var(--muted)}
+button{font:inherit;font-weight:600;padding:14px 22px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#msg{min-height:1.5em;margin:12px 2px;color:var(--err);font-size:.95rem}
+#card{display:none;background:var(--panel);border:1.5px solid var(--line);border-radius:14px;overflow:hidden}
+#card.on{display:block}
+#thumb{width:100%;max-height:300px;object-fit:cover;display:block;background:var(--line)}
+.body{padding:18px 20px 22px}
+.title{font-weight:600;margin:0 0 2px;overflow-wrap:anywhere}
+.meta{color:var(--muted);font-size:.9rem;margin:0 0 16px}
+label{display:block;font-size:.9rem;color:var(--muted);margin-bottom:6px}
+select{width:100%;padding:12px;font:inherit;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:10px;margin-bottom:14px}
+#dl{width:100%}
+#bar{display:none;height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:0 0 8px}
+#fill{height:100%;width:0;background:var(--accent);transition:width .3s}
+#stat{display:none;color:var(--muted);font-size:.9rem;margin:0 0 12px}
+.note{color:var(--muted);font-size:.82rem;margin-top:22px}
+@media (max-width:480px){.row{flex-direction:column}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Paste a link, get the video.</h1>
+  <p class="sub">Works with Instagram Reels, YouTube videos and Shorts, and X posts. Saves the highest quality available.</p>
+  <div class="row">
+    <input id="url" type="url" placeholder="https://" aria-label="Video link" autocomplete="off">
+    <button id="go">Find video</button>
+  </div>
+  <div id="msg" role="alert"></div>
+  <section id="card" aria-live="polite">
+    <img id="thumb" alt="">
+    <div class="body">
+      <p class="title" id="title"></p>
+      <p class="meta" id="meta"></p>
+      <label for="q">Quality</label>
+      <select id="q"></select>
+      <div id="bar"><div id="fill"></div></div>
+      <p id="stat"></p>
+      <button id="dl">Download</button>
+    </div>
+  </section>
+  <p class="note">Only download content you own or have permission to save. Respect each platform's terms and the creator's rights.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let current="";
+const fmt=s=>s?`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`:"";
+async function find(){
+  const url=$("url").value.trim();
+  $("msg").textContent="";$("card").classList.remove("on");
+  if(!url){$("msg").textContent="Paste a link first.";return}
+  $("go").disabled=true;$("go").textContent="Looking…";
+  try{
+    const r=await fetch("/api/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||"Something went wrong.");
+    current=url;
+    $("thumb").src=d.thumbnail||"";$("thumb").style.display=d.thumbnail?"block":"none";
+    $("title").textContent=d.title;
+    $("meta").textContent=[d.uploader,fmt(d.duration)].filter(Boolean).join(" · ");
+    const q=$("q");q.innerHTML="";
+    q.add(new Option("Best available","best"));
+    d.heights.filter(h=>h>=240).forEach(h=>q.add(new Option(h+"p",String(h))));
+    q.add(new Option("Audio only (MP3)","audio"));
+    $("card").classList.add("on");
+  }catch(e){$("msg").textContent=e.message}
+  $("go").disabled=false;$("go").textContent="Find video";
+}
+$("go").onclick=find;
+$("url").addEventListener("keydown",e=>{if(e.key==="Enter")find()});
+$("dl").onclick=async()=>{
+  const btn=$("dl");btn.disabled=true;btn.textContent="Working…";
+  $("bar").style.display="block";$("stat").style.display="block";$("fill").style.width="0";$("stat").textContent="Starting…";
+  $("msg").textContent="";
+  try{
+    const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:current,q:$("q").value})});
+    const {id,error}=await r.json();
+    if(!r.ok)throw new Error(error);
+    while(true){
+      await new Promise(res=>setTimeout(res,1000));
+      const s=await (await fetch("/api/status/"+id)).json();
+      if(s.status==="error")throw new Error(s.error||"Download failed.");
+      $("fill").style.width=s.percent+"%";
+      $("stat").textContent=s.status==="processing"
+        ?"Merging video and audio… almost done"
+        :`${s.percent}%  ${s.speed||""}  ${s.eta?"· "+s.eta+" left":""}`;
+      if(s.status==="done"){
+        $("stat").textContent="Done. Your download is starting.";
+        const a=document.createElement("a");a.href="/api/file/"+id;document.body.appendChild(a);a.click();a.remove();
+        break;
+      }
+    }
+  }catch(e){$("msg").textContent=e.message;$("stat").style.display="none";$("bar").style.display="none"}
+  btn.disabled=false;btn.textContent="Download";
+};
+</script>
+</body>
+</html>
